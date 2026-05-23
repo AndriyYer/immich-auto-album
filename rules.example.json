@@ -1,0 +1,24 @@
+{
+  "poll_interval_seconds": 1800,
+  "server_url": "http://immich-server:2283",
+  "rules": [
+    {
+      "name": "alice-photos-of-bob",
+      "api_key_env": "ALICE_API_KEY",
+      "source": {
+        "type": "person",
+        "person_id": "<bob's person UUID in alice's library>"
+      },
+      "target_album_id": "<photos-of-bob album UUID>"
+    },
+    {
+      "name": "bob-photos-of-alice",
+      "api_key_env": "BOB_API_KEY",
+      "source": {
+        "type": "person",
+        "person_id": "<alice's person UUID in bob's library>"
+      },
+      "target_album_id": "<photos-of-alice album UUID>"
+    }
+  ]
+}

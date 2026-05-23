@@ -1,0 +1,18 @@
+# This block will be inserted into /volume1/docker/immich/compose.yaml under `services:`
+# (after immich-machine-learning).
+# Networks block at the bottom of compose.yaml does NOT need changes; sidecar joins the
+# default network so it can reach `immich-server:2283`.
+
+  auto-album:
+    container_name: immich_auto_album
+    build:
+      context: ./auto-album
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./auto-album/config:/app/config:ro
+      - ./auto-album/data:/app/data
+    env_file:
+      - ./auto-album/.env
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
