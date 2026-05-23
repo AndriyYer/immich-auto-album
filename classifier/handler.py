@@ -41,13 +41,20 @@ DEFAULT_VIDEO_OPTS = {
     "early_terminate_conf": 0.70,
 }
 SEARCH_PAGE_SIZE = 250
+# Flush cache to disk after this many newly-classified or evicted entries.
+# Bounds work lost to a mid-cycle crash on long first scans (Celeron-class
+# CPU + 10K-asset library is ~5 hours).
+SAVE_EVERY = 200
 
 
 def _cache_path(rule_name):
     return CACHE_DIR / f"{rule_name}.json"
 
 
-def load_cache(rule_name):
+def load_cache(rule_name, expected_model=None, logger=None):
+    """Read the cache JSON for `rule_name`. If `expected_model` is given and
+    the cache was built with a different model, discard it (the confidences
+    would be from a different network and not comparable)."""
     p = _cache_path(rule_name)
     if not p.exists():
         return {}
@@ -55,6 +62,16 @@ def load_cache(rule_name):
         with p.open() as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
+        return {}
+    cached_model = data.get("model")
+    if expected_model and cached_model and cached_model != expected_model:
+        if logger:
+            logger(
+                f"rule {rule_name}: cache was built with model {cached_model!r} "
+                f"but current model is {expected_model!r}; discarding to avoid "
+                f"stale confidences",
+                level="warn",
+            )
         return {}
     return data.get("entries", {})
 
@@ -182,7 +199,9 @@ def _iter_all_assets(client):
             return
         yield from items
         nxt = assets.get("nextPage")
-        if nxt is None:
+        # Treat empty string / 0 / null as terminal, matching sidecar.py's
+        # paginator. Immich sometimes returns "" instead of null at the end.
+        if not nxt:
             return
         page = int(nxt)
 
@@ -199,79 +218,101 @@ def fetch_source_image_classifier(client, source, rule_name, logger):
 
     session = None  # lazy
     input_name = None
-    cache = load_cache(rule_name)
-    cache_dirty = False
+    expected_model = Path(model_path).stem
+    cache = load_cache(rule_name, expected_model=expected_model, logger=logger)
 
-    counts = {"cached": 0, "classified": 0, "errors": 0,
+    counts = {"cached": 0, "classified": 0, "errors": 0, "evicted": 0,
               "skipped_trashed": 0, "skipped_video_long": 0}
     matched_ids = set()
+    seen_ids = set()
+    unsaved = 0
+    iter_completed = False
 
-    for asset in _iter_all_assets(client):
-        asset_id = asset["id"]
-        if asset.get("isTrashed") or asset.get("isArchived"):
-            counts["skipped_trashed"] += 1
-            if asset_id in cache:
-                cache.pop(asset_id, None)
-                cache_dirty = True
-            continue
+    try:
+        for asset in _iter_all_assets(client):
+            asset_id = asset["id"]
+            seen_ids.add(asset_id)
 
-        cached = cache.get(asset_id)
-        cached_confs = (cached or {}).get("confs", {})
-        # Cache hit only if every class we currently care about has a cached score.
-        if cached and all(c in cached_confs for c in classes):
-            counts["cached"] += 1
-            if _matches_thresholds(cached_confs, thresholds):
-                matched_ids.add(asset_id)
-            continue
-
-        kind = asset.get("type", "")
-        try:
-            if session is None:
-                session = load_session(model_path, prefer_gpu=False)
-                input_name = session.get_inputs()[0].name
-
-            if kind == "IMAGE":
-                confs, frames = _classify_image(session, input_name, client, asset_id, classes)
-            elif kind == "VIDEO":
-                duration_s = parse_duration(asset.get("duration"))
-                if duration_s > video_opts["max_duration_seconds"]:
-                    counts["skipped_video_long"] += 1
-                    cache[asset_id] = {
-                        "kind": kind,
-                        "classified_at": _now_iso(),
-                        "skipped": "video_too_long",
-                        "duration_s": duration_s,
-                        "confs": {c: 0.0 for c in classes},
-                    }
-                    cache_dirty = True
-                    continue
-                confs, frames = _classify_video(
-                    session, input_name, client, asset_id, classes, video_opts,
-                )
-            else:
+            if asset.get("isTrashed") or asset.get("isArchived"):
+                counts["skipped_trashed"] += 1
+                if cache.pop(asset_id, None) is not None:
+                    unsaved += 1
                 continue
-        except Exception as e:
-            counts["errors"] += 1
-            logger(f"rule {rule_name}: classify {asset_id} failed: {e!r}", level="warn")
-            continue
 
-        cache[asset_id] = {
-            "kind": kind,
-            "classified_at": _now_iso(),
-            "frames_scored": frames,
-            "confs": {name: round(c, 4) for name, c in confs.items()},
-        }
-        cache_dirty = True
-        counts["classified"] += 1
-        if _matches_thresholds(confs, thresholds):
-            matched_ids.add(asset_id)
+            cached = cache.get(asset_id)
+            cached_confs = (cached or {}).get("confs", {})
+            # Cache hit only if every class we currently care about has a cached score.
+            if cached and all(c in cached_confs for c in classes):
+                counts["cached"] += 1
+                if _matches_thresholds(cached_confs, thresholds):
+                    matched_ids.add(asset_id)
+                continue
 
-    if cache_dirty:
-        save_cache(rule_name, cache, model_path)
+            kind = asset.get("type", "")
+            try:
+                if session is None:
+                    session = load_session(model_path, prefer_gpu=False)
+                    input_name = session.get_inputs()[0].name
+
+                if kind == "IMAGE":
+                    confs, frames = _classify_image(session, input_name, client, asset_id, classes)
+                elif kind == "VIDEO":
+                    duration_s = parse_duration(asset.get("duration"))
+                    if duration_s > video_opts["max_duration_seconds"]:
+                        counts["skipped_video_long"] += 1
+                        cache[asset_id] = {
+                            "kind": kind,
+                            "classified_at": _now_iso(),
+                            "skipped": "video_too_long",
+                            "duration_s": duration_s,
+                            "confs": {c: 0.0 for c in classes},
+                        }
+                        unsaved += 1
+                        continue
+                    confs, frames = _classify_video(
+                        session, input_name, client, asset_id, classes, video_opts,
+                    )
+                else:
+                    continue
+            except Exception as e:
+                counts["errors"] += 1
+                logger(f"rule {rule_name}: classify {asset_id} failed: {e!r}", level="warn")
+                continue
+
+            cache[asset_id] = {
+                "kind": kind,
+                "classified_at": _now_iso(),
+                "frames_scored": frames,
+                "confs": {name: round(c, 4) for name, c in confs.items()},
+            }
+            unsaved += 1
+            counts["classified"] += 1
+            if _matches_thresholds(confs, thresholds):
+                matched_ids.add(asset_id)
+
+            if unsaved >= SAVE_EVERY:
+                save_cache(rule_name, cache, model_path)
+                unsaved = 0
+        iter_completed = True
+    finally:
+        # Drop cache entries for assets no longer in the library, but only if
+        # we successfully iterated the whole thing. A partial seen_ids would
+        # incorrectly nuke valid rows from later pages.
+        if iter_completed:
+            stale = set(cache.keys()) - seen_ids
+            if stale:
+                for k in stale:
+                    cache.pop(k, None)
+                counts["evicted"] = len(stale)
+                unsaved += len(stale)
+        if unsaved > 0:
+            save_cache(rule_name, cache, model_path)
+
     logger(
         f"rule {rule_name}: image_classifier "
         f"cached={counts['cached']} classified={counts['classified']} "
-        f"errors={counts['errors']} skip_trashed={counts['skipped_trashed']} "
+        f"errors={counts['errors']} evicted={counts['evicted']} "
+        f"skip_trashed={counts['skipped_trashed']} "
         f"skip_vid_long={counts['skipped_video_long']} matched_total={len(matched_ids)}"
     )
     return matched_ids

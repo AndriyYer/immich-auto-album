@@ -149,3 +149,7 @@ python -m classifier.cache_from_csv \
 - Polling, not webhook. Immich doesn't expose a "new asset" event, so this is a 30 min loop by default. Tighten via `poll_interval_seconds` in rules.json.
 - First run is unbounded. Point a rule at someone with 5000 tagged photos and all 5000 go in. Add a date cutoff in the handler if you don't want that.
 - `image_classifier` on a low-power host will be CPU-bound on the first full scan. Use the backlog seeder above if that matters.
+
+## License
+
+MIT. See `LICENSE`.
