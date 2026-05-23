@@ -2,5 +2,9 @@
 rules.json
 data/
 state.json
+runs/
+caches/
+classifier/models/
+classifier/venv*/
 __pycache__/
 *.pyc

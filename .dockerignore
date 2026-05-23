@@ -1,0 +1,18 @@
+.git
+.gitignore
+data/
+config/
+logs/
+
+# Backlog runner is not deployed to the sidecar image - it's a one-shot
+# tool meant to run on a GPU host, not in the polling container.
+classifier/backlog.py
+classifier/cache_from_csv.py
+classifier/venv/
+classifier/venv-export/
+
+# Model is mounted at runtime, not baked in
+classifier/models/
+
+*.pyc
+__pycache__

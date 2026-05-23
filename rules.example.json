@@ -19,6 +19,21 @@
         "person_id": "<alice's person UUID in bob's library>"
       },
       "target_album_id": "<photos-of-alice album UUID>"
+    },
+    {
+      "name": "alice-cats",
+      "api_key_env": "ALICE_API_KEY",
+      "source": {
+        "type": "image_classifier",
+        "classes": {"cat": 0.30, "dog": 0.70},
+        "video": {
+          "max_duration_seconds": 300,
+          "max_frames": 20,
+          "sample_period_seconds": 2.0,
+          "early_terminate_conf": 0.70
+        }
+      },
+      "target_album_id": "<cats album UUID>"
     }
   ]
 }

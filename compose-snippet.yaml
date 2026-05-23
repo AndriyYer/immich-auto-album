@@ -1,7 +1,7 @@
-# This block will be inserted into /volume1/docker/immich/compose.yaml under `services:`
-# (after immich-machine-learning).
-# Networks block at the bottom of compose.yaml does NOT need changes; sidecar joins the
-# default network so it can reach `immich-server:2283`.
+# Drop this block into your immich `compose.yaml` under `services:` (next to
+# immich-server / immich-machine-learning). The sidecar joins immich's default
+# docker network and reaches the server at `immich-server:2283`, so the
+# top-level `networks:` block needs no changes.
 
   auto-album:
     container_name: immich_auto_album
@@ -12,7 +12,17 @@
     volumes:
       - ./auto-album/config:/app/config:ro
       - ./auto-album/data:/app/data
+      - ./auto-album/models:/app/models:ro
     env_file:
       - ./auto-album/.env
+    # Memory cap keeps YOLO inference from squeezing the rest of the stack
+    # during a polling cycle. Adjust to taste.
+    # A `cpus:` limit also works on most hosts but is rejected by the Synology
+    # DSM kernel ("NanoCPUs can not be set..."); add it back if your host
+    # supports CFS scheduling.
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
     labels:
       - "com.centurylinklabs.watchtower.enable=false"

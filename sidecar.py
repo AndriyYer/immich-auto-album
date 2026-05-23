@@ -80,12 +80,19 @@ class ImmichClient:
         return added
 
 
-def fetch_source_person(client, source):
+def fetch_source_person(client, source, rule_name=None, logger=None):
     return client.search_by_person(source["person_id"])
+
+
+def fetch_source_image_classifier(client, source, rule_name=None, logger=None):
+    # Lazy import: only pulls in onnxruntime/opencv if a rule of this type runs.
+    from classifier.handler import fetch_source_image_classifier as impl
+    return impl(client, source, rule_name=rule_name, logger=logger or log)
 
 
 SOURCE_HANDLERS = {
     "person": fetch_source_person,
+    "image_classifier": fetch_source_image_classifier,
 }
 
 
@@ -156,7 +163,7 @@ def run_rule(rule, server_url, rule_state):
         removed = removed - restored
 
     try:
-        desired = handler(client, rule["source"])
+        desired = handler(client, rule["source"], rule_name=rule["name"], logger=log)
     except requests.RequestException as e:
         log(f"rule {rule['name']}: source fetch failed: {e}", level="error")
         return {"added": current - removed, "removed": removed}
