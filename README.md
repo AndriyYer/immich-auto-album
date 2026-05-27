@@ -5,7 +5,7 @@ A polling sidecar for [Immich](https://immich.app) that keeps shared albums popu
 - **`person`** - every photo containing a given face cluster. I use this for something like Google Photos partner sharing: take a photo of your partner, it shows up in the album you share with them, and vice versa.
 - **`image_classifier`** - every photo or short video whose YOLO11m score for one of the configured COCO classes is above a per-class threshold. I use this for a shared "cats" album that picks up cat photos from both partners' libraries automatically.
 
-The intent of this project was to emulate the Google Photos behaviour where photos I take of my spouse (and vice versa) are automatically populated to an album she can view. Similarly, any photos taken of our cats should be added to one shared folder we can both view. 
+The intent of this project was to emulate the Google Photos behaviour where photos I take of my spouse are automatically populated to an album she can view (and vice versa). Similarly, any photos taken of our cats should be added to one shared folder we can both view. 
 
 ## How it works
 
